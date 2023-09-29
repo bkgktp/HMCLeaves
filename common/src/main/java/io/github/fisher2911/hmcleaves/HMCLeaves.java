@@ -27,7 +27,7 @@ import io.github.fisher2911.hmcleaves.cache.ChunkBlockCache;
 import io.github.fisher2911.hmcleaves.cache.WorldBlockCache;
 import io.github.fisher2911.hmcleaves.command.LeavesCommand;
 import io.github.fisher2911.hmcleaves.config.LeavesConfig;
-import io.github.fisher2911.hmcleaves.data.LeafDatabase;
+import io.github.fisher2911.hmcleaves.database.Database;
 import io.github.fisher2911.hmcleaves.debug.Debugger;
 import io.github.fisher2911.hmcleaves.hook.Hooks;
 import io.github.fisher2911.hmcleaves.listener.InteractionListener;
@@ -54,7 +54,7 @@ public class HMCLeaves extends JavaPlugin {
 
     private LeavesConfig leavesConfig;
     private BlockCache blockCache;
-    private LeafDatabase leafDatabase;
+    private Database leafDatabase;
     private BlockBreakManager blockBreakManager;
     private WorldAndChunkLoadListener worldAndChunkLoadListener;
     private LeavesPacketListener leavesPacketListener;
@@ -107,7 +107,6 @@ public class HMCLeaves extends JavaPlugin {
         PacketEvents.setAPI(api);
         PacketEvents.getAPI().load();
         PacketEvents.getAPI().init();
-        this.leafDatabase = new LeafDatabase(this);
         this.blockBreakManager = new BlockBreakManager(new ConcurrentHashMap<>(), this);
         this.worldAndChunkLoadListener = new WorldAndChunkLoadListener(this);
         this.leavesPacketListener = new LeavesPacketListener(this);
@@ -120,6 +119,7 @@ public class HMCLeaves extends JavaPlugin {
         this.getCommand("hmcleaves").setExecutor(new LeavesCommand(this));
         final int bStatsPluginId = 16900;
         final Metrics metrics = new Metrics(this, bStatsPluginId);
+        this.leafDatabase = Database.create(this, this.leavesConfig);
     }
 
     public void reload() {
@@ -164,7 +164,7 @@ public class HMCLeaves extends JavaPlugin {
         return this.blockCache;
     }
 
-    public LeafDatabase getLeafDatabase() {
+    public Database getDatabase() {
         return this.leafDatabase;
     }
 

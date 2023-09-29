@@ -32,6 +32,7 @@ import io.github.fisher2911.hmcleaves.data.CaveVineData;
 import io.github.fisher2911.hmcleaves.data.LimitedStacking;
 import io.github.fisher2911.hmcleaves.data.LogData;
 import io.github.fisher2911.hmcleaves.data.SoundData;
+import io.github.fisher2911.hmcleaves.database.DatabaseType;
 import io.github.fisher2911.hmcleaves.hook.Hooks;
 import io.github.fisher2911.hmcleaves.packet.BlockBreakModifier;
 import io.github.fisher2911.hmcleaves.util.ChainedBlockUtil;
@@ -330,6 +331,9 @@ public class LeavesConfig {
     private int chunkVersion;
     private boolean useWorldWhitelist;
     private Set<String> whitelistedWorlds;
+    private boolean useTextureHook;
+    private DatabaseType databaseType;
+    private String mongoDbUri;
 
     public LeavesConfig(
             HMCLeaves plugin,
@@ -528,6 +532,9 @@ public class LeavesConfig {
 
     private static final String CHUNK_VERSION_PATH = "chunk-version";
     private static final String USE_WORLD_WHITELIST_PATH = "use-world-whitelist";
+    private static final String USE_TEXTURE_HOOK_PATH = "use-texture-hook";
+    private static final String DATABASE_TYPE_PATH = "database-type";
+    private static final String MONGODB_URI_PATH = "mongodb-uri";
     private static final String WHITELISTED_WORLDS_PATH = "whitelisted-worlds";
 
     private static final Collection<String> DEFAULT_FILE_NAMES = List.of(
@@ -559,6 +566,9 @@ public class LeavesConfig {
         } catch (IllegalArgumentException ignored) {
         }
         this.useWorldWhitelist = config.getBoolean(USE_WORLD_WHITELIST_PATH, false);
+        this.useTextureHook = config.getBoolean(USE_TEXTURE_HOOK_PATH, true);
+        this.databaseType = DatabaseType.valueOf(config.getString(DATABASE_TYPE_PATH, "SQLITE").toUpperCase());
+        this.mongoDbUri = config.getString(MONGODB_URI_PATH);
         this.whitelistedWorlds = new HashSet<>(config.getStringList(WHITELISTED_WORLDS_PATH));
         if (!config.contains(CHUNK_VERSION_PATH)) {
             config.set(CHUNK_VERSION_PATH, 1);
@@ -576,7 +586,7 @@ public class LeavesConfig {
         }
         boolean createDefaults = true;
         for (final File file : files) {
-            if (!DEFAULT_FILE_NAMES.contains(file)) {
+            if (!DEFAULT_FILE_NAMES.contains(file.getName())) {
                 createDefaults = false;
                 break;
             }
@@ -603,6 +613,7 @@ public class LeavesConfig {
             this.loadAgeableSections(fileConfig);
         }
         for (Material leaf : LEAVES) {
+            if (!this.useTextureHook) break;
             this.textureFileGenerator.generateFile(
                     leaf,
                     this.blockDataMap.values().stream()
@@ -612,6 +623,7 @@ public class LeavesConfig {
             );
         }
         for (Material sapling : SAPLINGS) {
+            if (!this.useTextureHook) break;
             this.textureFileGenerator.generateFile(
                     sapling,
                     this.blockDataMap.values().stream()
@@ -621,6 +633,7 @@ public class LeavesConfig {
             );
         }
         for (Material log : LOGS) {
+            if (!this.useTextureHook) break;
             this.textureFileGenerator.generateFile(
                     Material.NOTE_BLOCK,
                     this.blockDataMap.values().stream()
@@ -631,6 +644,7 @@ public class LeavesConfig {
             );
         }
         for (Material log : STRIPPED_LOGS) {
+            if (!this.useTextureHook) break;
             this.textureFileGenerator.generateFile(
                     Material.NOTE_BLOCK,
                     this.blockDataMap.values().stream()
@@ -685,6 +699,18 @@ public class LeavesConfig {
 
     public boolean isUseWorldWhitelist() {
         return useWorldWhitelist;
+    }
+
+    public boolean isUseTextureHook() {
+        return this.useTextureHook;
+    }
+
+    public DatabaseType getDatabaseType() {
+        return databaseType;
+    }
+
+    public String getMongoDbUri() {
+        return mongoDbUri;
     }
 
     public boolean canPlaceBlockAgainst(BlockData blockData, Block block) {

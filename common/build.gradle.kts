@@ -53,4 +53,5 @@ dependencies {
     implementation(platform("com.intellectualsites.bom:bom-1.18.x:1.19"))
     implementation("com.github.retrooper.packetevents:spigot:2.0.2")
     implementation("io.github.fisher2911.FisherLib:common:1.0.3-beta")
+    implementation("org.mongodb:mongodb-driver-sync:4.10.2")
 }

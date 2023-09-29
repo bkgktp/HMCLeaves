@@ -18,13 +18,19 @@
  *
  */
 
-package io.github.fisher2911.hmcleaves.data;
+package io.github.fisher2911.hmcleaves.database;
 
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Multimaps;
 import io.github.fisher2911.hmcleaves.HMCLeaves;
 import io.github.fisher2911.hmcleaves.cache.ChunkBlockCache;
 import io.github.fisher2911.hmcleaves.config.LeavesConfig;
+import io.github.fisher2911.hmcleaves.data.AgeableData;
+import io.github.fisher2911.hmcleaves.data.BlockData;
+import io.github.fisher2911.hmcleaves.data.CaveVineData;
+import io.github.fisher2911.hmcleaves.data.LeafData;
+import io.github.fisher2911.hmcleaves.data.LogData;
+import io.github.fisher2911.hmcleaves.data.SaplingData;
 import io.github.fisher2911.hmcleaves.util.ChunkUtil;
 import io.github.fisher2911.hmcleaves.world.ChunkPosition;
 import io.github.fisher2911.hmcleaves.world.Position;
@@ -51,7 +57,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-public class LeafDatabase {
+public class SQLiteDatabase implements Database {
 
     private final HMCLeaves plugin;
     private final LeavesConfig config;
@@ -63,7 +69,7 @@ public class LeafDatabase {
     private final Map<UUID, Multimap<ChunkPosition, Integer>> possibleWorldDefaultLayers;
     private final Set<ChunkPosition> currentlyLoadingChunks;
 
-    public LeafDatabase(HMCLeaves plugin) {
+    protected SQLiteDatabase(HMCLeaves plugin) {
         this.plugin = plugin;
         this.config = plugin.getLeavesConfig();
         this.databaseFilePath = this.plugin.getDataFolder().toPath().resolve("database").resolve("leaves.db");
@@ -73,11 +79,13 @@ public class LeafDatabase {
         this.currentlyLoadingChunks = ConcurrentHashMap.newKeySet();
     }
 
+    @Override
     public boolean isLayerLoaded(ChunkPosition smallChunk) {
         return !this.getPossibleWorldDefaultLayers(smallChunk).isEmpty() &&
                 !this.currentlyLoadingChunks.contains(smallChunk.toLargeChunk());
     }
 
+    @Override
     public Collection<Integer> getPossibleWorldDefaultLayers(ChunkPosition smallChunk) {
         final int largeChunkX = ChunkUtil.getLargeChunkCoordFromChunkCoord(smallChunk.x());
         final int largeChunkZ = ChunkUtil.getLargeChunkCoordFromChunkCoord(smallChunk.z());
@@ -103,10 +111,12 @@ public class LeafDatabase {
         return this.connection;
     }
 
+    @Override
     public void load() {
         this.createTables();
     }
 
+    @Override
     public void doDatabaseWriteAsync(Runnable runnable) {
         if (this.writeExecutor.isShutdown() || this.writeExecutor.isTerminated()) {
             runnable.run();
@@ -121,6 +131,7 @@ public class LeafDatabase {
         });
     }
 
+    @Override
     public void doDatabaseReadAsync(Runnable runnable) {
         this.readExecutor.execute(() -> {
             try {
@@ -489,6 +500,7 @@ public class LeafDatabase {
         }
     }
 
+    @Override
     public void close() {
         try {
             this.connection.close();
@@ -497,6 +509,7 @@ public class LeafDatabase {
         }
     }
 
+    @Override
     public boolean isChunkLoaded(ChunkPosition chunkPosition) {
         try (final PreparedStatement statement = this.connection.prepareStatement(GET_CHUNK_VERSION_STATEMENT)) {
             statement.setBytes(1, this.uuidToBytes(chunkPosition.world()));
@@ -513,6 +526,7 @@ public class LeafDatabase {
         return false;
     }
 
+    @Override
     public void setChunkLoaded(ChunkPosition chunkPosition) {
         try {
             final Connection connection = this.getConnection();
@@ -531,11 +545,13 @@ public class LeafDatabase {
         }
     }
 
+    @Override
     public List<Runnable> shutdownNow() {
         this.readExecutor.shutdown();
         return this.writeExecutor.shutdownNow();
     }
 
+    @Override
     public void saveBlocksInChunk(ChunkBlockCache chunk) {
         try {
             chunk.setSaving(true);
@@ -564,6 +580,7 @@ public class LeafDatabase {
         }
     }
 
+    @Override
     public Map<Position, BlockData> getBlocksInChunk(ChunkPosition chunkPosition, LeavesConfig config) {
         final Map<Position, BlockData> blocks = new HashMap<>();
         blocks.putAll(this.getLeafBlocksInChunk(chunkPosition, config));
@@ -574,6 +591,7 @@ public class LeafDatabase {
         return blocks;
     }
 
+    @Override
     public void saveDefaultDataLayers(UUID worldUUID, Collection<Integer> yLayers, ChunkPosition smallChunk) throws SQLException {
         if (yLayers.isEmpty()) return;
         final ChunkPosition largeChunk = smallChunk.toLargeChunk();
@@ -599,6 +617,7 @@ public class LeafDatabase {
         connection.commit();
     }
 
+    @Override
     public void loadAllDefaultPossibleLayersInWorld(UUID worldUUID, ChunkPosition smallChunk) {
         final List<Integer> yLevels = new ArrayList<>();
         final Connection connection = this.getConnection();
