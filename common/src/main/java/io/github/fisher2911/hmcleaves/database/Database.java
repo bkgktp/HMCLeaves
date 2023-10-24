@@ -27,6 +27,8 @@ import io.github.fisher2911.hmcleaves.data.BlockData;
 import io.github.fisher2911.hmcleaves.world.ChunkPosition;
 import io.github.fisher2911.hmcleaves.world.Position;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.sql.SQLException;
 import java.util.Collection;
 import java.util.List;
@@ -35,8 +37,23 @@ import java.util.UUID;
 
 public interface Database {
 
+    static byte[] uuidToBytes(UUID uuid) {
+        return ByteBuffer.wrap(new byte[16])
+                .order(ByteOrder.BIG_ENDIAN)
+                .putLong(uuid.getMostSignificantBits())
+                .putLong(uuid.getLeastSignificantBits()).array();
+    }
+
+    static UUID bytesToUUID(byte[] bytes) {
+        ByteBuffer bb = ByteBuffer.wrap(bytes).order(ByteOrder.BIG_ENDIAN);
+        long firstLong = bb.getLong();
+        long secondLong = bb.getLong();
+        return new UUID(firstLong, secondLong);
+    }
+
     static Database create(HMCLeaves plugin, LeavesConfig config) {
         return switch (config.getDatabaseType()) {
+            case MONGODB -> new MongoDBDatabase(plugin);
             default -> new SQLiteDatabase(plugin);
         };
     }

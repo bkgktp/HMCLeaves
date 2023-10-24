@@ -31,14 +31,11 @@ import io.github.fisher2911.hmcleaves.data.CaveVineData;
 import io.github.fisher2911.hmcleaves.data.LeafData;
 import io.github.fisher2911.hmcleaves.data.LogData;
 import io.github.fisher2911.hmcleaves.data.SaplingData;
-import io.github.fisher2911.hmcleaves.util.ChunkUtil;
 import io.github.fisher2911.hmcleaves.world.ChunkPosition;
 import io.github.fisher2911.hmcleaves.world.Position;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -47,11 +44,9 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -65,9 +60,7 @@ public class SQLiteDatabase implements Database {
     private final ExecutorService writeExecutor;
     private final ExecutorService readExecutor;
     private Connection connection;
-    // 528*528 chunks, not 16x16 chunks
-    private final Map<UUID, Multimap<ChunkPosition, Integer>> possibleWorldDefaultLayers;
-    private final Set<ChunkPosition> currentlyLoadingChunks;
+    private LeafDatabase leafDatabase;
 
     protected SQLiteDatabase(HMCLeaves plugin) {
         this.plugin = plugin;
@@ -75,25 +68,17 @@ public class SQLiteDatabase implements Database {
         this.databaseFilePath = this.plugin.getDataFolder().toPath().resolve("database").resolve("leaves.db");
         this.writeExecutor = Executors.newSingleThreadExecutor();
         this.readExecutor = Executors.newFixedThreadPool(5);
-        this.possibleWorldDefaultLayers = new ConcurrentHashMap<>();
-        this.currentlyLoadingChunks = ConcurrentHashMap.newKeySet();
+        this.leafDatabase = new LeafDatabase();
     }
 
     @Override
     public boolean isLayerLoaded(ChunkPosition smallChunk) {
-        return !this.getPossibleWorldDefaultLayers(smallChunk).isEmpty() &&
-                !this.currentlyLoadingChunks.contains(smallChunk.toLargeChunk());
+        return leafDatabase.isLayerLoaded(smallChunk);
     }
 
     @Override
     public Collection<Integer> getPossibleWorldDefaultLayers(ChunkPosition smallChunk) {
-        final int largeChunkX = ChunkUtil.getLargeChunkCoordFromChunkCoord(smallChunk.x());
-        final int largeChunkZ = ChunkUtil.getLargeChunkCoordFromChunkCoord(smallChunk.z());
-        final UUID worldUUID = smallChunk.world();
-        final ChunkPosition largeChunk = new ChunkPosition(worldUUID, largeChunkX, largeChunkZ);
-        final Multimap<ChunkPosition, Integer> layers = possibleWorldDefaultLayers.get(largeChunk.world());
-        if (layers == null) return Collections.emptyList();
-        return layers.get(largeChunk);
+        return leafDatabase.getPossibleWorldDefaultLayers(smallChunk);
     }
 
     @Nullable
@@ -512,7 +497,7 @@ public class SQLiteDatabase implements Database {
     @Override
     public boolean isChunkLoaded(ChunkPosition chunkPosition) {
         try (final PreparedStatement statement = this.connection.prepareStatement(GET_CHUNK_VERSION_STATEMENT)) {
-            statement.setBytes(1, this.uuidToBytes(chunkPosition.world()));
+            statement.setBytes(1, Database.uuidToBytes(chunkPosition.world()));
             statement.setInt(2, chunkPosition.x());
             statement.setInt(3, chunkPosition.z());
             try (final ResultSet resultSet = statement.executeQuery()) {
@@ -533,7 +518,7 @@ public class SQLiteDatabase implements Database {
             if (connection == null) throw new IllegalStateException("Could not connect to database!");
             connection.setAutoCommit(false);
             try (final PreparedStatement statement = connection.prepareStatement(INSERT_CHUNK_VERSION_STATEMENT)) {
-                statement.setBytes(1, this.uuidToBytes(chunkPosition.world()));
+                statement.setBytes(1, Database.uuidToBytes(chunkPosition.world()));
                 statement.setInt(2, chunkPosition.x());
                 statement.setInt(3, chunkPosition.z());
                 statement.setInt(4, this.config.getChunkVersion());
@@ -595,12 +580,12 @@ public class SQLiteDatabase implements Database {
     public void saveDefaultDataLayers(UUID worldUUID, Collection<Integer> yLayers, ChunkPosition smallChunk) throws SQLException {
         if (yLayers.isEmpty()) return;
         final ChunkPosition largeChunk = smallChunk.toLargeChunk();
-        final Multimap<ChunkPosition, Integer> multimap = this.possibleWorldDefaultLayers
+        final Multimap<ChunkPosition, Integer> multimap = this.leafDatabase.getPossibleWorldDefaultLayers()
         .computeIfAbsent(worldUUID, uuid -> Multimaps.newSetMultimap(new ConcurrentHashMap<>(), ConcurrentHashMap::newKeySet));
         multimap.putAll(largeChunk, yLayers);
         final Connection connection = this.getConnection();
         if (connection == null) throw new IllegalStateException("Could not connect to database!");
-        final byte[] worldUUIDBytes = this.uuidToBytes(worldUUID);
+        final byte[] worldUUIDBytes = Database.uuidToBytes(worldUUID);
         this.connection.setAutoCommit(false);
         try (final PreparedStatement statement = connection.prepareStatement(INSERT_DEFAULT_CHUNK_DATA_LAYERS_STATEMENT)) {
             for (int y : yLayers) {
@@ -622,9 +607,9 @@ public class SQLiteDatabase implements Database {
         final List<Integer> yLevels = new ArrayList<>();
         final Connection connection = this.getConnection();
         if (connection == null) throw new IllegalStateException("Could not connect to database!");
-        final byte[] worldUUIDBytes = this.uuidToBytes(worldUUID);
+        final byte[] worldUUIDBytes = Database.uuidToBytes(worldUUID);
         final ChunkPosition largeChunk = smallChunk.toLargeChunk();
-        this.currentlyLoadingChunks.add(largeChunk);
+        this.leafDatabase.getCurrentlyLoadingChunks().add(largeChunk);
         try (final PreparedStatement statement = connection.prepareStatement(GET_DEFAULT_CHUNK_DATA_LAYERS_STATEMENT)) {
             statement.setBytes(1, worldUUIDBytes);
             statement.setInt(2, largeChunk.x());
@@ -637,10 +622,10 @@ public class SQLiteDatabase implements Database {
         } catch (SQLException e) {
             throw new IllegalStateException("Could not get all possible layers in chunk!", e);
         }
-        final Multimap<ChunkPosition, Integer> multimap = this.possibleWorldDefaultLayers
+        final Multimap<ChunkPosition, Integer> multimap = this.leafDatabase.getPossibleWorldDefaultLayers()
         .computeIfAbsent(worldUUID, uuid -> Multimaps.newSetMultimap(new ConcurrentHashMap<>(), ConcurrentHashMap::newKeySet));
         multimap.putAll(largeChunk, yLevels);
-        this.currentlyLoadingChunks.remove(largeChunk);
+        this.leafDatabase.getCurrentlyLoadingChunks().remove(largeChunk);
     }
 
     private void saveLeafBlocksInChunk(ChunkBlockCache chunk) throws SQLException {
@@ -651,7 +636,7 @@ public class SQLiteDatabase implements Database {
         final ChunkPosition chunkPosition = chunk.getChunkPosition();
         final int chunkX = chunkPosition.x();
         final int chunkZ = chunkPosition.z();
-        final byte[] worldUUIDBytes = this.uuidToBytes(chunkPosition.world());
+        final byte[] worldUUIDBytes = Database.uuidToBytes(chunkPosition.world());
         this.connection.setAutoCommit(false);
         try (final PreparedStatement statement = connection.prepareStatement(SET_LEAF_BLOCK_STATEMENT)) {
             for (var entry : chunk.getBlockDataMap().entrySet()) {
@@ -686,7 +671,7 @@ public class SQLiteDatabase implements Database {
         final ChunkPosition chunkPosition = chunkBlockCache.getChunkPosition();
         final int chunkX = chunkPosition.x();
         final int chunkZ = chunkPosition.z();
-        final byte[] worldUUIDBytes = this.uuidToBytes(chunkPosition.world());
+        final byte[] worldUUIDBytes = Database.uuidToBytes(chunkPosition.world());
         try (final PreparedStatement statement = connection.prepareStatement(DELETE_LEAF_BLOCK_STATEMENT)) {
             chunkBlockCache.clearRemovedPositions(entry -> {
                 try {
@@ -715,7 +700,7 @@ public class SQLiteDatabase implements Database {
     private void deleteLeafChunk(ChunkPosition chunkPosition) throws SQLException {
         final Connection connection = this.getConnection();
         if (connection == null) throw new IllegalStateException("Could not connect to database!");
-        final byte[] worldUUIDBytes = this.uuidToBytes(chunkPosition.world());
+        final byte[] worldUUIDBytes = Database.uuidToBytes(chunkPosition.world());
         final int chunkX = chunkPosition.x();
         final int chunkZ = chunkPosition.z();
         connection.setAutoCommit(false);
@@ -733,7 +718,7 @@ public class SQLiteDatabase implements Database {
     private Map<Position, BlockData> getLeafBlocksInChunk(ChunkPosition chunkPosition, LeavesConfig config) {
         final Connection connection = this.getConnection();
         if (connection == null) throw new IllegalStateException("Could not connect to database!");
-        final byte[] worldUUIDBytes = this.uuidToBytes(chunkPosition.world());
+        final byte[] worldUUIDBytes = Database.uuidToBytes(chunkPosition.world());
         final int chunkX = chunkPosition.x();
         final int chunkZ = chunkPosition.z();
         final Map<Position, BlockData> leafBlocks = new HashMap<>();
@@ -776,7 +761,7 @@ public class SQLiteDatabase implements Database {
         final ChunkPosition chunkPosition = chunkBlockCache.getChunkPosition();
         final int chunkX = chunkPosition.x();
         final int chunkZ = chunkPosition.z();
-        final byte[] worldUUIDBytes = this.uuidToBytes(chunkPosition.world());
+        final byte[] worldUUIDBytes = Database.uuidToBytes(chunkPosition.world());
         this.connection.setAutoCommit(false);
         try (final PreparedStatement statement = connection.prepareStatement(SET_LOG_BLOCK_STATEMENT)) {
             for (var entry : chunkBlockCache.getBlockDataMap().entrySet()) {
@@ -810,7 +795,7 @@ public class SQLiteDatabase implements Database {
         final ChunkPosition chunkPosition = chunkBlockCache.getChunkPosition();
         final int chunkX = chunkPosition.x();
         final int chunkZ = chunkPosition.z();
-        final byte[] worldUUIDBytes = this.uuidToBytes(chunkPosition.world());
+        final byte[] worldUUIDBytes = Database.uuidToBytes(chunkPosition.world());
         try (final PreparedStatement statement = connection.prepareStatement(DELETE_LOG_BLOCK_STATEMENT)) {
             chunkBlockCache.clearRemovedPositions(entry -> {
                 try {
@@ -839,7 +824,7 @@ public class SQLiteDatabase implements Database {
     private void deleteLogChunk(ChunkPosition chunkPosition) throws SQLException {
         final Connection connection = this.getConnection();
         if (connection == null) throw new IllegalStateException("Could not connect to database!");
-        final byte[] worldUUIDBytes = this.uuidToBytes(chunkPosition.world());
+        final byte[] worldUUIDBytes = Database.uuidToBytes(chunkPosition.world());
         final int chunkX = chunkPosition.x();
         final int chunkZ = chunkPosition.z();
         connection.setAutoCommit(false);
@@ -857,7 +842,7 @@ public class SQLiteDatabase implements Database {
     private Map<Position, BlockData> getLogBlocksInChunk(ChunkPosition chunkPosition, LeavesConfig config) {
         final Connection connection = this.getConnection();
         if (connection == null) throw new IllegalStateException("Could not connect to database!");
-        final byte[] worldUUIDBytes = this.uuidToBytes(chunkPosition.world());
+        final byte[] worldUUIDBytes = Database.uuidToBytes(chunkPosition.world());
         final int chunkX = chunkPosition.x();
         final int chunkZ = chunkPosition.z();
         final Map<Position, BlockData> logBlocks = new HashMap<>();
@@ -899,7 +884,7 @@ public class SQLiteDatabase implements Database {
         final ChunkPosition chunkPosition = chunk.getChunkPosition();
         final int chunkX = chunkPosition.x();
         final int chunkZ = chunkPosition.z();
-        final byte[] worldUUIDBytes = this.uuidToBytes(chunkPosition.world());
+        final byte[] worldUUIDBytes = Database.uuidToBytes(chunkPosition.world());
         this.connection.setAutoCommit(false);
         try (final PreparedStatement statement = connection.prepareStatement(SET_SAPLING_BLOCK_STATEMENT)) {
             for (var entry : chunk.getBlockDataMap().entrySet()) {
@@ -933,7 +918,7 @@ public class SQLiteDatabase implements Database {
         final ChunkPosition chunkPosition = chunkBlockCache.getChunkPosition();
         final int chunkX = chunkPosition.x();
         final int chunkZ = chunkPosition.z();
-        final byte[] worldUUIDBytes = this.uuidToBytes(chunkPosition.world());
+        final byte[] worldUUIDBytes = Database.uuidToBytes(chunkPosition.world());
         try (final PreparedStatement statement = connection.prepareStatement(DELETE_SAPLING_BLOCK_STATEMENT)) {
             chunkBlockCache.clearRemovedPositions(entry -> {
                 try {
@@ -962,7 +947,7 @@ public class SQLiteDatabase implements Database {
     private void deleteSaplingChunk(ChunkPosition chunkPosition) throws SQLException {
         final Connection connection = this.getConnection();
         if (connection == null) throw new IllegalStateException("Could not connect to database!");
-        final byte[] worldUUIDBytes = this.uuidToBytes(chunkPosition.world());
+        final byte[] worldUUIDBytes = Database.uuidToBytes(chunkPosition.world());
         final int chunkX = chunkPosition.x();
         final int chunkZ = chunkPosition.z();
         connection.setAutoCommit(false);
@@ -980,7 +965,7 @@ public class SQLiteDatabase implements Database {
     private Map<Position, BlockData> getSaplingBlocksInChunk(ChunkPosition chunkPosition, LeavesConfig config) {
         final Connection connection = this.getConnection();
         if (connection == null) throw new IllegalStateException("Could not connect to database!");
-        final byte[] worldUUIDBytes = this.uuidToBytes(chunkPosition.world());
+        final byte[] worldUUIDBytes = Database.uuidToBytes(chunkPosition.world());
         final int chunkX = chunkPosition.x();
         final int chunkZ = chunkPosition.z();
         final Map<Position, BlockData> saplingBlocks = new HashMap<>();
@@ -1018,7 +1003,7 @@ public class SQLiteDatabase implements Database {
         final ChunkPosition chunkPosition = chunk.getChunkPosition();
         final int chunkX = chunkPosition.x();
         final int chunkZ = chunkPosition.z();
-        final byte[] worldUUIDBytes = this.uuidToBytes(chunkPosition.world());
+        final byte[] worldUUIDBytes = Database.uuidToBytes(chunkPosition.world());
         this.connection.setAutoCommit(false);
         try (final PreparedStatement statement = connection.prepareStatement(SET_CAVE_VINES_BLOCK_STATEMENT)) {
             for (var entry : chunk.getBlockDataMap().entrySet()) {
@@ -1053,7 +1038,7 @@ public class SQLiteDatabase implements Database {
         final ChunkPosition chunkPosition = chunkBlockCache.getChunkPosition();
         final int chunkX = chunkPosition.x();
         final int chunkZ = chunkPosition.z();
-        final byte[] worldUUIDBytes = this.uuidToBytes(chunkPosition.world());
+        final byte[] worldUUIDBytes = Database.uuidToBytes(chunkPosition.world());
         try (final PreparedStatement statement = connection.prepareStatement(DELETE_CAVE_VINES_BLOCK_STATEMENT)) {
             chunkBlockCache.clearRemovedPositions(entry -> {
                 try {
@@ -1082,7 +1067,7 @@ public class SQLiteDatabase implements Database {
     private void deleteCaveVinesChunk(ChunkPosition chunkPosition) throws SQLException {
         final Connection connection = this.getConnection();
         if (connection == null) throw new IllegalStateException("Could not connect to database!");
-        final byte[] worldUUIDBytes = this.uuidToBytes(chunkPosition.world());
+        final byte[] worldUUIDBytes = Database.uuidToBytes(chunkPosition.world());
         final int chunkX = chunkPosition.x();
         final int chunkZ = chunkPosition.z();
         connection.setAutoCommit(false);
@@ -1100,7 +1085,7 @@ public class SQLiteDatabase implements Database {
     private Map<Position, BlockData> getCaveVineBlocksInChunk(ChunkPosition chunkPosition, LeavesConfig config) {
         final Connection connection = this.getConnection();
         if (connection == null) throw new IllegalStateException("Could not connect to database!");
-        final byte[] worldUUIDBytes = this.uuidToBytes(chunkPosition.world());
+        final byte[] worldUUIDBytes = Database.uuidToBytes(chunkPosition.world());
         final int chunkX = chunkPosition.x();
         final int chunkZ = chunkPosition.z();
         final Map<Position, BlockData> caveVineBlocks = new HashMap<>();
@@ -1139,7 +1124,7 @@ public class SQLiteDatabase implements Database {
         final ChunkPosition chunkPosition = chunk.getChunkPosition();
         final int chunkX = chunkPosition.x();
         final int chunkZ = chunkPosition.z();
-        final byte[] worldUUIDBytes = this.uuidToBytes(chunkPosition.world());
+        final byte[] worldUUIDBytes = Database.uuidToBytes(chunkPosition.world());
         this.connection.setAutoCommit(false);
         try (final PreparedStatement statement = connection.prepareStatement(SET_AGEABLE_BLOCK_STATEMENT)) {
             for (var entry : chunk.getBlockDataMap().entrySet()) {
@@ -1173,7 +1158,7 @@ public class SQLiteDatabase implements Database {
         final ChunkPosition chunkPosition = chunkBlockCache.getChunkPosition();
         final int chunkX = chunkPosition.x();
         final int chunkZ = chunkPosition.z();
-        final byte[] worldUUIDBytes = this.uuidToBytes(chunkPosition.world());
+        final byte[] worldUUIDBytes = Database.uuidToBytes(chunkPosition.world());
         try (final PreparedStatement statement = connection.prepareStatement(DELETE_AGEABLE_BLOCK_STATEMENT)) {
             chunkBlockCache.clearRemovedPositions(entry -> {
                 try {
@@ -1202,7 +1187,7 @@ public class SQLiteDatabase implements Database {
     private void deleteAgeableChunk(ChunkPosition chunkPosition) throws SQLException {
         final Connection connection = this.getConnection();
         if (connection == null) throw new IllegalStateException("Could not connect to database!");
-        final byte[] worldUUIDBytes = this.uuidToBytes(chunkPosition.world());
+        final byte[] worldUUIDBytes = Database.uuidToBytes(chunkPosition.world());
         final int chunkX = chunkPosition.x();
         final int chunkZ = chunkPosition.z();
         connection.setAutoCommit(false);
@@ -1220,7 +1205,7 @@ public class SQLiteDatabase implements Database {
     private Map<Position, BlockData> getAgeableBlocksInChunk(ChunkPosition chunkPosition, LeavesConfig config) {
         final Connection connection = this.getConnection();
         if (connection == null) throw new IllegalStateException("Could not connect to database!");
-        final byte[] worldUUIDBytes = this.uuidToBytes(chunkPosition.world());
+        final byte[] worldUUIDBytes = Database.uuidToBytes(chunkPosition.world());
         final int chunkX = chunkPosition.x();
         final int chunkZ = chunkPosition.z();
         final Map<Position, BlockData> ageableBlocks = new HashMap<>();
@@ -1248,20 +1233,6 @@ public class SQLiteDatabase implements Database {
         } catch (SQLException e) {
             throw new IllegalStateException("Could not get ageable blocks in chunk " + chunkX + ", " + chunkZ + "!", e);
         }
-    }
-
-    private byte[] uuidToBytes(UUID uuid) {
-        return ByteBuffer.wrap(new byte[16])
-                .order(ByteOrder.BIG_ENDIAN)
-                .putLong(uuid.getMostSignificantBits())
-                .putLong(uuid.getLeastSignificantBits()).array();
-    }
-
-    private UUID bytesToUUID(byte[] bytes) {
-        ByteBuffer bb = ByteBuffer.wrap(bytes).order(ByteOrder.BIG_ENDIAN);
-        long firstLong = bb.getLong();
-        long secondLong = bb.getLong();
-        return new UUID(firstLong, secondLong);
     }
 
 }

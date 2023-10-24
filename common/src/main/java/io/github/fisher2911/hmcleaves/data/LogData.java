@@ -93,6 +93,23 @@ public record LogData(
         );
     }
 
+    public LogData stripped(boolean stripped) {
+        if (this.stripped == stripped) return this;
+        return new LogData(
+                this.id,
+                this.strippedLogId,
+                this.sendBlockId,
+                this.realBlockType,
+                this.strippedBlockType,
+                stripped,
+                this.strippedSendBlockId,
+                this.axis,
+                this.modelPath,
+                this.supportableFaces,
+                this.blockDataSound
+        );
+    }
+
     @Override
     public Sound placeSound() {
         return Sound.BLOCK_WOOD_PLACE;

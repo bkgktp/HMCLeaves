@@ -114,12 +114,12 @@ public class HMCLeaves extends JavaPlugin {
         this.registerListeners();
         Hooks.load(this);
         this.leavesConfig.load();
-        this.leafDatabase.load();
         Bukkit.getScheduler().runTaskLater(this, () -> this.worldAndChunkLoadListener.loadDefaultWorlds(), 20);
         this.getCommand("hmcleaves").setExecutor(new LeavesCommand(this));
         final int bStatsPluginId = 16900;
         final Metrics metrics = new Metrics(this, bStatsPluginId);
         this.leafDatabase = Database.create(this, this.leavesConfig);
+        this.leafDatabase.load();
     }
 
     public void reload() {
