@@ -26,6 +26,9 @@ import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.UpdateOptions;
+import com.mongodb.client.model.Updates;
 import io.github.fisher2911.hmcleaves.HMCLeaves;
 import io.github.fisher2911.hmcleaves.cache.ChunkBlockCache;
 import io.github.fisher2911.hmcleaves.config.LeavesConfig;
@@ -40,6 +43,7 @@ import io.github.fisher2911.hmcleaves.world.Position;
 import org.bson.BsonDocument;
 import org.bson.BsonInt32;
 import org.bson.Document;
+import org.bson.conversions.Bson;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
@@ -54,14 +58,16 @@ import java.util.concurrent.Executors;
 
 public class MongoDBDatabase implements Database {
 
+    private static final UpdateOptions UPDATE_OPTIONS = new UpdateOptions().upsert(true);
+
     private final HMCLeaves plugin;
-    private MongoClient mongoClient;
-    private MongoDatabase worldsDatabase;
-    private MongoDatabase worldDefaultLayersDatabase;
+    private final MongoClient mongoClient;
+    private final MongoDatabase worldsDatabase;
+    private final MongoDatabase worldDefaultLayersDatabase;
     private final LeavesConfig config;
     private final ExecutorService writeExecutor;
     private final ExecutorService readExecutor;
-    private LeafDatabase leafDatabase;
+    private final LeafDatabase leafDatabase;
 
     protected MongoDBDatabase(HMCLeaves plugin) {
         this.plugin = plugin;
@@ -117,7 +123,7 @@ public class MongoDBDatabase implements Database {
 
     @Override
     public void close() {
-
+        mongoClient.close();
     }
 
     private static final String ID_KEY = "_id";
@@ -160,11 +166,20 @@ public class MongoDBDatabase implements Database {
         final BsonDocument id = new BsonDocument();
         id.put(CHUNK_POSITION_X_KEY, new BsonInt32(chunkPosition.x()));
         id.put(CHUNK_POSITION_Z_KEY, new BsonInt32(chunkPosition.z()));
-        final Document document = new Document(Map.of(
-                ID_KEY, id,
-                CHUNK_VERSION_KEY, this.config.getChunkVersion()
-        ));
-        worldCollection.insertOne(document);
+//        final Document document = new Document(Map.of(
+//                ID_KEY, id,
+//                CHUNK_VERSION_KEY, this.config.getChunkVersion()
+//        ));
+        final Bson filter = Filters.eq(ID_KEY, id);
+//        worldCollection.updateOne(filter, document, UPDATE_OPTIONS);
+        worldCollection.updateOne(
+                filter,
+                List.of(
+                        Updates.set(ID_KEY, id),
+                        Updates.set(CHUNK_VERSION_KEY, this.config.getChunkVersion())
+                ),
+                UPDATE_OPTIONS
+        );
     }
 
     @Override
@@ -182,11 +197,11 @@ public class MongoDBDatabase implements Database {
         final int chunkX = chunkPosition.x();
         final int chunkZ = chunkPosition.z();
         final MongoCollection<Document> chunkDocuments = this.worldsDatabase.getCollection(chunkPosition.world().toString());
-        final Document chunkDocument = new Document();
+//        final Document chunkDocument = new Document();
         final BsonDocument id = new BsonDocument();
         id.put(CHUNK_POSITION_X_KEY, new BsonInt32(chunkX));
         id.put(CHUNK_POSITION_Z_KEY, new BsonInt32(chunkZ));
-        chunkDocument.put(ID_KEY, id);
+//        chunkDocument.put(ID_KEY, id);
         final List<Document> blockDocuments = new ArrayList<>();
         for (var entry : chunk.getBlockDataMap().entrySet()) {
             final Position position = entry.getKey();
@@ -213,8 +228,10 @@ public class MongoDBDatabase implements Database {
             }
             blockDocuments.add(blockDocument);
         }
-        chunkDocument.put(BLOCKS_KEY, blockDocuments);
-        chunkDocuments.insertOne(chunkDocument);
+//        chunkDocument.put(BLOCKS_KEY, blockDocuments);
+        final Bson filter = Filters.eq(ID_KEY, id);
+//        chunkDocuments.updateOne(filter, chunkDocument, UPDATE_OPTIONS);
+        chunkDocuments.updateOne(filter, Updates.set(BLOCKS_KEY, blockDocuments), UPDATE_OPTIONS);
         chunk.setSaving(false);
         chunk.markClean();
         chunk.setSafeToMarkClean(true);
@@ -263,13 +280,21 @@ public class MongoDBDatabase implements Database {
                 .computeIfAbsent(worldUUID, uuid -> Multimaps.newSetMultimap(new ConcurrentHashMap<>(), ConcurrentHashMap::newKeySet));
         multimap.putAll(largeChunk, yLayers);
         final MongoCollection<Document> layers = this.worldDefaultLayersDatabase.getCollection(worldUUID.toString());
-        final Document document = new Document();
+//        final Document document = new Document();
         final BsonDocument id = new BsonDocument();
         id.put(CHUNK_POSITION_X_KEY, new BsonInt32(largeChunk.x()));
         id.put(CHUNK_POSITION_Z_KEY, new BsonInt32(largeChunk.z()));
-        document.put(ID_KEY, id);
-        document.put(LAYERS_KEY, yLayers);
-        layers.insertOne(document);
+//        Bson update = Updates.set(ID_KEY, id);
+
+//        document.put(ID_KEY, id);
+//        document.put(LAYERS_KEY, yLayers);
+        final Bson filter = Filters.eq(ID_KEY, id);
+        layers.updateMany(
+                filter,
+                List.of(Updates.set(ID_KEY, id), Updates.set(LAYERS_KEY, yLayers)),
+//                document,
+                UPDATE_OPTIONS
+        );
     }
 
     @Override
@@ -319,10 +344,14 @@ public class MongoDBDatabase implements Database {
             toDelete.add(document);
             return true;
         });
+        if (toDelete.isEmpty()) {
+            return;
+        }
         documents.deleteMany(new Document("$or", toDelete));
     }
 
-    private @Nullable String blockTypeKeyFromBlockDataClass(BlockData blockData) {
+    private @Nullable
+    String blockTypeKeyFromBlockDataClass(BlockData blockData) {
         if (blockData instanceof AgeableData) return AGEABLE_BLOCK_TYPE;
         if (blockData instanceof CaveVineData) return CAVE_VINE_BLOCK_TYPE;
         if (blockData instanceof LeafData) return LEAF_BLOCK_TYPE;
