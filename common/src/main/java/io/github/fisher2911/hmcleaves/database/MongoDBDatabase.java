@@ -48,6 +48,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -123,7 +124,7 @@ public class MongoDBDatabase implements Database {
 
     @Override
     public void close() {
-        mongoClient.close();
+//        mongoClient.close();
     }
 
     private static final String ID_KEY = "_id";
@@ -153,7 +154,8 @@ public class MongoDBDatabase implements Database {
         final BsonDocument id = new BsonDocument();
         id.put(CHUNK_POSITION_X_KEY, new BsonInt32(chunkPosition.x()));
         id.put(CHUNK_POSITION_Z_KEY, new BsonInt32(chunkPosition.z()));
-        final Document found = worldCollection.find(id).first();
+        final Bson filter = Filters.eq(ID_KEY, id);
+        final Document found = worldCollection.find(filter).first();
         if (found == null) {
             return false;
         }
@@ -185,7 +187,9 @@ public class MongoDBDatabase implements Database {
     @Override
     public List<Runnable> shutdownNow() {
         this.readExecutor.shutdown();
-        return this.writeExecutor.shutdownNow();
+        this.writeExecutor.shutdown();
+//        return this.writeExecutor.shutdownNow();
+        return Collections.emptyList();
     }
 
     @Override
@@ -193,6 +197,16 @@ public class MongoDBDatabase implements Database {
         chunk.setSaving(true);
         this.deleteRemovedBlocksInChunk(chunk);
         if (chunk.getBlockDataMap().isEmpty()) return;
+        final Map<Position, BlockData> toSave = new HashMap<>();
+        for (var entry : chunk.getBlockDataMap().entrySet()) {
+            if (!entry.getValue().shouldSave()) {
+                continue;
+            }
+            toSave.put(entry.getKey(), entry.getValue());
+        }
+        if (toSave.isEmpty()) {
+            return;
+        }
         final ChunkPosition chunkPosition = chunk.getChunkPosition();
         final int chunkX = chunkPosition.x();
         final int chunkZ = chunkPosition.z();
@@ -203,7 +217,7 @@ public class MongoDBDatabase implements Database {
         id.put(CHUNK_POSITION_Z_KEY, new BsonInt32(chunkZ));
 //        chunkDocument.put(ID_KEY, id);
         final List<Document> blockDocuments = new ArrayList<>();
-        for (var entry : chunk.getBlockDataMap().entrySet()) {
+        for (var entry : toSave.entrySet()) {
             final Position position = entry.getKey();
             final int blockX = position.x();
             final int blockY = position.y();
@@ -221,6 +235,7 @@ public class MongoDBDatabase implements Database {
             final String type = blockTypeKeyFromBlockDataClass(blockData);
             if (type == null) continue;
             blockDocument.put(BLOCK_TYPE_KEY, type);
+            blockDocument.put(BLOCK_ID_KEY, blockData.id());
             switch (type) {
                 case CAVE_VINE_BLOCK_TYPE -> blockDocument.put(GLOW_BERRY_KEY, ((CaveVineData) blockData).glowBerry());
                 case LEAF_BLOCK_TYPE -> blockDocument.put(WATERLOGGED_KEY, ((LeafData) blockData).waterlogged());
@@ -246,18 +261,21 @@ public class MongoDBDatabase implements Database {
         final BsonDocument id = new BsonDocument();
         id.put(CHUNK_POSITION_X_KEY, new BsonInt32(chunkX));
         id.put(CHUNK_POSITION_Z_KEY, new BsonInt32(chunkZ));
-        final BsonDocument query = new BsonDocument();
-        query.put(ID_KEY, id);
+        final Bson query = Filters.eq(ID_KEY, id);
+//        query.put(ID_KEY, id);
         final Document document = leafBlocks.find(query).first();
         if (document == null) return blocks;
         final List<Document> blockDocuments = document.getList(BLOCKS_KEY, Document.class);
+        if (blockDocuments == null) return blocks;
         for (var blockDocument : blockDocuments) {
-            final int blockX = blockDocument.getInteger(BLOCK_X_KEY);
-            final int blockY = blockDocument.getInteger(BLOCK_Y_KEY);
-            final int blockZ = blockDocument.getInteger(BLOCK_Z_KEY);
+            final Document idDoc = blockDocument.get(ID_KEY, Document.class);
+            final int blockX = idDoc.getInteger(BLOCK_X_KEY);
+            final int blockY = idDoc.getInteger(BLOCK_Y_KEY);
+            final int blockZ = idDoc.getInteger(BLOCK_Z_KEY);
             final String blockType = blockDocument.getString(BLOCK_TYPE_KEY);
+            final String blockId = blockDocument.getString(BLOCK_ID_KEY);
             final Position position = new Position(chunkPosition.world(), blockX, blockY, blockZ);
-            final BlockData blockData = config.getBlockData(blockType);
+            final BlockData blockData = config.getBlockData(blockId);
             if (blockData == null) {
                 this.plugin.getLogger().warning("Could not find block data for block type " + blockType + " at position " +
                         blockX + ", " + blockY + ", " + blockZ + "!");
@@ -305,7 +323,8 @@ public class MongoDBDatabase implements Database {
         final BsonDocument id = new BsonDocument();
         id.put(CHUNK_POSITION_X_KEY, new BsonInt32(largeChunk.x()));
         id.put(CHUNK_POSITION_Z_KEY, new BsonInt32(largeChunk.z()));
-        final Document found = layers.find(id).first();
+        final Bson filter = Filters.eq(ID_KEY, id);
+        final Document found = layers.find(filter).first();
         if (found == null) {
             this.leafDatabase.getCurrentlyLoadingChunks().remove(largeChunk);
             return;
