@@ -25,13 +25,7 @@ import io.github.fisher2911.hmcleaves.api.event.HMCLeavesBlockDataBreakEvent;
 import io.github.fisher2911.hmcleaves.api.event.HMCLeavesBlockDataPlaceEvent;
 import io.github.fisher2911.hmcleaves.cache.BlockCache;
 import io.github.fisher2911.hmcleaves.config.LeavesConfig;
-import io.github.fisher2911.hmcleaves.data.AgeableData;
-import io.github.fisher2911.hmcleaves.data.BlockData;
-import io.github.fisher2911.hmcleaves.data.CaveVineData;
-import io.github.fisher2911.hmcleaves.data.LeafData;
-import io.github.fisher2911.hmcleaves.data.LogData;
-import io.github.fisher2911.hmcleaves.data.MineableData;
-import io.github.fisher2911.hmcleaves.data.SaplingData;
+import io.github.fisher2911.hmcleaves.data.*;
 import io.github.fisher2911.hmcleaves.hook.Hooks;
 import io.github.fisher2911.hmcleaves.packet.BlockBreakManager;
 import io.github.fisher2911.hmcleaves.packet.PacketUtils;
@@ -39,7 +33,6 @@ import io.github.fisher2911.hmcleaves.util.ChainedBlockUtil;
 import io.github.fisher2911.hmcleaves.util.ItemUtil;
 import io.github.fisher2911.hmcleaves.util.PDCUtil;
 import io.github.fisher2911.hmcleaves.world.Position;
-import io.github.retrooper.packetevents.util.SpigotConversionUtil;
 import org.bukkit.Axis;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
@@ -138,7 +131,10 @@ public class InteractionListener implements Listener {
         }
         final Material placeLocationType = placeLocation.getBlock().getType();
 
-        if (this.checkStripLog(player, block, clickedWith)) return;
+        if (this.checkStripLog(player, block, clickedWith)) {
+            //block strip yapıldı
+            return;
+        }
 
         if (!this.isReplaceable(placeLocation.getBlock().getBlockData())) {
             return;
@@ -154,6 +150,7 @@ public class InteractionListener implements Listener {
             }
         }
         if (blockData == null) return;
+
         if (!this.leavesConfig.canPlaceBlockAgainst(blockData, placeLocation.getBlock())) {
             event.setCancelled(true);
             return;
@@ -212,8 +209,9 @@ public class InteractionListener implements Listener {
             placedBlock.setBlockData(leaves, true);
             return;
         }
+
         if (blockData instanceof final LogData logData && placedBlock.getBlockData() instanceof final Orientable orientable) {
-            orientable.setAxis(logData.axis());
+            if (logData.logMechanic()) orientable.setAxis(logData.axis());
             placedBlock.setBlockData(orientable, true);
             return;
         }
@@ -380,7 +378,7 @@ public class InteractionListener implements Listener {
         }
         final ItemStack heldItem = player.getInventory().getItemInMainHand();
         final Material material = heldItem.getType();
-        if (ItemUtil.isQuickMiningTool(material)) {
+        if (ItemUtil.isQuickMiningTool(material) && blockData instanceof LogData logData && logData.logMechanic() && !this.leavesConfig.isHardnessDisable()) {
             Bukkit.getScheduler().runTaskAsynchronously(this.plugin, () -> PacketUtils.sendMiningFatigue(player));
         }
         if (!(blockData instanceof final MineableData mineableData) || mineableData.blockBreakModifier() == null) {
@@ -399,10 +397,13 @@ public class InteractionListener implements Listener {
 
     @EventHandler(ignoreCancelled = true, priority = EventPriority.MONITOR)
     public void onSwitchItemHeld(PlayerItemHeldEvent event) {
+        if (this.leavesConfig.isHardnessDisable())
+            return;
         final Player player = event.getPlayer();
         if (player.getGameMode() == GameMode.CREATIVE) return;
         final ItemStack newItem = player.getInventory().getItem(event.getNewSlot());
         final ItemStack oldItem = player.getInventory().getItem(event.getPreviousSlot());
+
         if (newItem != null) {
             final Material material = newItem.getType();
             if (ItemUtil.isQuickMiningTool(material)) {
@@ -429,9 +430,12 @@ public class InteractionListener implements Listener {
         if (blockData instanceof final MineableData mineableData && mineableData.blockBreakModifier() != null) {
             return;
         }
-        final Material material = itemStack.getType();
-        if (ItemUtil.isQuickMiningTool(material)) {
-            Bukkit.getScheduler().runTaskAsynchronously(this.plugin, () -> PacketUtils.removeMiningFatigue(player));
+        if (blockData instanceof LogData logData && logData.logMechanic() && !this.leavesConfig.isHardnessDisable()) {
+
+            final Material material = itemStack.getType();
+            if (ItemUtil.isQuickMiningTool(material)) {
+                Bukkit.getScheduler().runTaskAsynchronously(this.plugin, () -> PacketUtils.removeMiningFatigue(player));
+            }
         }
 
     }
@@ -514,6 +518,8 @@ public class InteractionListener implements Listener {
         if (!(blockData instanceof final LogData logData)) {
             return false;
         }
+        if (!logData.logMechanic()) return false;
+
         if (logData.stripped()) {
             return false;
         }

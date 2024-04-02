@@ -26,7 +26,7 @@ import io.github.fisher2911.hmcleaves.cache.ChunkBlockCache;
 import io.github.fisher2911.hmcleaves.cache.WorldBlockCache;
 import io.github.fisher2911.hmcleaves.config.LeavesConfig;
 import io.github.fisher2911.hmcleaves.data.BlockData;
-import io.github.fisher2911.hmcleaves.data.LeafDatabase;
+import io.github.fisher2911.hmcleaves.database.Database;
 import io.github.fisher2911.hmcleaves.packet.PacketUtils;
 import io.github.fisher2911.hmcleaves.world.ChunkPosition;
 import io.github.fisher2911.hmcleaves.world.Position;
@@ -58,13 +58,13 @@ public class WorldAndChunkLoadListener implements Listener {
     private final HMCLeaves plugin;
     private final BlockCache blockCache;
     private final LeavesConfig leavesConfig;
-    private final LeafDatabase leafDatabase;
+    private final Database leafDatabase;
 
     public WorldAndChunkLoadListener(HMCLeaves plugin) {
         this.plugin = plugin;
         this.blockCache = plugin.getBlockCache();
         this.leavesConfig = plugin.getLeavesConfig();
-        this.leafDatabase = plugin.getLeafDatabase();
+        this.leafDatabase = plugin.getDatabase();
     }
 
     public void loadDefaultWorlds() {
@@ -89,6 +89,8 @@ public class WorldAndChunkLoadListener implements Listener {
         final UUID worldUUID = world.getUID();
         final ChunkPosition chunkPosition = ChunkPosition.at(worldUUID, chunk.getX(), chunk.getZ());
         final ChunkSnapshot snapshot = chunk.getChunkSnapshot();
+
+
         this.leafDatabase.doDatabaseReadAsync(() -> {
             if (!this.leafDatabase.isChunkLoaded(chunkPosition)) {
                 this.loadNewChunkData(snapshot, world);
@@ -202,7 +204,8 @@ public class WorldAndChunkLoadListener implements Listener {
     @EventHandler
     public void onWorldLoad(WorldLoadEvent event) {
         final World world = event.getWorld();
-        if (!this.leavesConfig.isWorldWhitelisted(world)) return;
+        if (!this.leavesConfig.isWorldWhitelisted(world))
+            return;
         for (Chunk chunk : world.getLoadedChunks()) {
             this.loadChunk(chunk);
         }

@@ -38,6 +38,7 @@ public class PDCUtil {
     public static final NamespacedKey LEAF_WORLD_DISTANCE_KEY = new NamespacedKey(PLUGIN, "leaf_world_distance");
     public static final NamespacedKey LEAF_WORLD_PERSISTENCE_KEY = new NamespacedKey(PLUGIN, "leaf_world_persistence");
     public static final NamespacedKey LOG_ID_KEY = new NamespacedKey(PLUGIN, "log_id");
+    public static final NamespacedKey NOTEBLOCK_ID_KEY = new NamespacedKey(PLUGIN, "log_id");
     public static final NamespacedKey SAPLING_ID_KEY = new NamespacedKey(PLUGIN, "sapling_id");
     public static final NamespacedKey SAPLING_STAGE_KEY = new NamespacedKey(PLUGIN, "sapling_stage");
 

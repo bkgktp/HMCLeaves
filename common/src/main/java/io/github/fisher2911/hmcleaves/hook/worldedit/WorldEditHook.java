@@ -20,6 +20,7 @@
 
 package io.github.fisher2911.hmcleaves.hook.worldedit;
 
+import com.fastasyncworldedit.core.Fawe;
 import com.sk89q.jnbt.ByteTag;
 import com.sk89q.jnbt.CompoundTag;
 import com.sk89q.jnbt.IntTag;
@@ -31,6 +32,7 @@ import com.sk89q.worldedit.WorldEditException;
 import com.sk89q.worldedit.bukkit.BukkitAdapter;
 import com.sk89q.worldedit.event.extent.EditSessionEvent;
 import com.sk89q.worldedit.extent.AbstractDelegateExtent;
+import com.sk89q.worldedit.extent.Extent;
 import com.sk89q.worldedit.extent.clipboard.Clipboard;
 import com.sk89q.worldedit.extent.clipboard.io.ClipboardFormat;
 import com.sk89q.worldedit.extent.clipboard.io.ClipboardFormats;
@@ -89,7 +91,8 @@ public class WorldEditHook {
     }
 
     public void load() {
-        WorldEdit.getInstance().getEventBus().register(this);
+        Fawe.instance().getWorldEdit().getEventBus().register(this);
+        //WorldEdit.getInstance().getEventBus().register(this);
     }
 
     private static final String BUKKIT_NBT_TAG = "PublicBukkitValues";
@@ -197,51 +200,75 @@ public class WorldEditHook {
     }
 
     @Subscribe
-    public void onEditSession(EditSessionEvent event) {
-        event.setExtent(new AbstractDelegateExtent(event.getExtent()) {
-            @Override
-            public <T extends BlockStateHolder<T>> boolean setBlock(BlockVector3 pos, T block) throws WorldEditException {
-                final Position position = new Position(BukkitAdapter.adapt(event.getWorld()).getUID(), pos.getX(), pos.getY(), pos.getZ());
-                if (!(block instanceof final BaseBlock baseBlock)) return super.setBlock(pos, block);
-                if (baseBlock.getBlockType() != BlockTypes.FURNACE) return super.setBlock(pos, block);
-                final CompoundTag tag = baseBlock.getNbtData();
-                if (tag == null) {
-                    return super.setBlock(pos, block);
+    public void onEditSession(final EditSessionEvent event) {
+        event.setExtent((Extent) new AbstractDelegateExtent(event.getExtent()) {
+            public <T extends BlockStateHolder<T>> boolean setBlock(int x, int y, int z, T block) throws WorldEditException {
+                BaseBlock baseBlock;
+                CompoundTag bukkitTag;
+                Position position = new Position(BukkitAdapter.adapt(event.getWorld()).getUID(), x, y, z);
+                if (block instanceof BaseBlock) {
+                    baseBlock = (BaseBlock) block;
+                } else {
+                    return super.setBlock(x, y, z, (BlockStateHolder) block);
                 }
-                if (!(tag.getValue().get(BUKKIT_NBT_TAG) instanceof final CompoundTag bukkitTag)) {
-                    return super.setBlock(pos, block);
+                if (baseBlock.getBlockType() != BlockTypes.FURNACE)
+                    return super.setBlock(x, y, z, (BlockStateHolder) block);
+                CompoundTag tag = baseBlock.getNbtData();
+                if (tag == null)
+                    return super.setBlock(x, y, z, (BlockStateHolder) block);
+                Object object = tag.getValue().get("PublicBukkitValues");
+                if (object instanceof CompoundTag) {
+                    bukkitTag = (CompoundTag) object;
+                } else {
+                    return super.setBlock(x, y, z, (BlockStateHolder) block);
                 }
                 if (bukkitTag.containsKey(PDCUtil.LOG_ID_KEY.toString())) {
-                    final String logId = bukkitTag.getString(PDCUtil.LOG_ID_KEY.toString());
-                    final BlockData blockData = WorldEditHook.this.config.getBlockData(logId);
-                    if (!(blockData instanceof final LogData logData)) return super.setBlock(pos, block);
-                    final org.bukkit.block.data.BlockData bukkitLogData = logData.worldBlockType().createBlockData();
-                    WorldEditHook.this.blockCache.addBlockData(position, logData);
-                    return getExtent().setBlock(pos, BukkitAdapter.adapt(bukkitLogData));
+                    LogData logData;
+                    String logId = bukkitTag.getString(PDCUtil.LOG_ID_KEY.toString());
+                    BlockData blockData = WorldEditHook.this.config.getBlockData(logId);
+                    if (blockData instanceof LogData) {
+                        logData = (LogData) blockData;
+                    } else {
+                        return super.setBlock(x, y, z, (BlockStateHolder) block);
+                    }
+
+                    org.bukkit.block.data.BlockData bukkitLogData = logData.worldBlockType().createBlockData();
+                    WorldEditHook.this.blockCache.addBlockData(position, (BlockData) logData);
+                    return getExtent().setBlock(x, y, z, (BlockStateHolder) BukkitAdapter.adapt(bukkitLogData));
                 }
                 if (bukkitTag.containsKey(PDCUtil.LEAF_ID_KEY.toString())) {
-                    final String leafId = bukkitTag.getString(PDCUtil.LEAF_ID_KEY.toString());
-                    final BlockData blockData = WorldEditHook.this.config.getBlockData(leafId);
-                    if (!(blockData instanceof final LeafData leafData)) return super.setBlock(pos, block);
-                    final int distance = bukkitTag.getInt(PDCUtil.LEAF_WORLD_DISTANCE_KEY.toString());
-                    final boolean persistent = bukkitTag.getByte(PDCUtil.LEAF_WORLD_PERSISTENCE_KEY.toString()) == 1;
-                    final Leaves bukkitLeafData = (Leaves) leafData.realBlockType().createBlockData();
+                    LeafData leafData;
+                    String leafId = bukkitTag.getString(PDCUtil.LEAF_ID_KEY.toString());
+                    BlockData blockData = WorldEditHook.this.config.getBlockData(leafId);
+                    if (blockData instanceof LeafData) {
+                        leafData = (LeafData) blockData;
+                    } else {
+                        return super.setBlock(x, y, z, (BlockStateHolder) block);
+                    }
+                    int distance = bukkitTag.getInt(PDCUtil.LEAF_WORLD_DISTANCE_KEY.toString());
+                    boolean persistent = (bukkitTag.getByte(PDCUtil.LEAF_WORLD_PERSISTENCE_KEY.toString()) == 1);
+                    Leaves bukkitLeafData = (Leaves) leafData.realBlockType().createBlockData();
                     bukkitLeafData.setDistance(distance);
                     bukkitLeafData.setPersistent(persistent);
-                    WorldEditHook.this.blockCache.addBlockData(position, leafData);
-                    return getExtent().setBlock(pos, BukkitAdapter.adapt(bukkitLeafData));
+                    WorldEditHook.this.blockCache.addBlockData(position, (BlockData) leafData);
+                    return getExtent().setBlock(x, y, z, (BlockStateHolder) BukkitAdapter.adapt(bukkitLeafData));
                 }
                 if (bukkitTag.containsKey(PDCUtil.SAPLING_ID_KEY.toString())) {
-                    final String saplingId = bukkitTag.getString(PDCUtil.SAPLING_ID_KEY.toString());
-                    final BlockData blockData = WorldEditHook.this.config.getBlockData(saplingId);
-                    if (!(blockData instanceof final SaplingData saplingData)) return super.setBlock(pos, block);
-                    final int stage = bukkitTag.getInt(PDCUtil.SAPLING_STAGE_KEY.toString());
-                    final Sapling bukkitSaplingData = (Sapling) saplingData.realBlockType().createBlockData();
+                    SaplingData saplingData;
+                    String saplingId = bukkitTag.getString(PDCUtil.SAPLING_ID_KEY.toString());
+                    BlockData blockData = WorldEditHook.this.config.getBlockData(saplingId);
+                    if (blockData instanceof SaplingData) {
+                        saplingData = (SaplingData) blockData;
+                    } else {
+                        return super.setBlock(x, y, z, (BlockStateHolder) block);
+                    }
+                    int stage = bukkitTag.getInt(PDCUtil.SAPLING_STAGE_KEY.toString());
+                    Sapling bukkitSaplingData = (Sapling) saplingData.realBlockType().createBlockData();
                     bukkitSaplingData.setStage(stage);
-                    WorldEditHook.this.blockCache.addBlockData(position, saplingData);
-                    return getExtent().setBlock(pos, BukkitAdapter.adapt(bukkitSaplingData));
+                    WorldEditHook.this.blockCache.addBlockData(position, (BlockData) saplingData);
+                    return getExtent().setBlock(x, y, z, (BlockStateHolder) BukkitAdapter.adapt(bukkitSaplingData));
                 }
-                return super.setBlock(pos, block);
+                return super.setBlock(x, y, z, (BlockStateHolder) block);
             }
         });
     }

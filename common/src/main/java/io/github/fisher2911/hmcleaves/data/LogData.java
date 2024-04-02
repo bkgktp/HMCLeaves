@@ -46,7 +46,8 @@ public record LogData(
         Axis axis,
         String modelPath,
         Set<BlockFace> supportableFaces,
-        @Nullable BlockDataSound blockDataSound
+        @Nullable BlockDataSound blockDataSound,
+        boolean logMechanic
 ) implements BlockData, MineableData {
 
     @Override
@@ -89,7 +90,27 @@ public record LogData(
                 this.axis,
                 this.modelPath,
                 this.supportableFaces,
-                this.blockDataSound
+                this.blockDataSound,
+                this.logMechanic
+        );
+    }
+
+    public LogData stripped(boolean stripped) {
+        if (this.stripped == stripped)
+            return this;
+        return new LogData(
+                this.id,
+                this.strippedLogId,
+                this.sendBlockId,
+                this.realBlockType,
+                this.strippedBlockType,
+                stripped,
+                this.strippedSendBlockId,
+                this.axis,
+                this.modelPath,
+                this.supportableFaces,
+                this.blockDataSound,
+                this.logMechanic
         );
     }
 

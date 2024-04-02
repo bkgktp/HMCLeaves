@@ -112,6 +112,8 @@ public class LeavesPacketListener extends PacketListenerAbstract {
         if (!(event.getPlayer() instanceof final Player player)) return;
         if (!this.leavesConfig.isWorldWhitelisted(player.getWorld())) return;
         final PacketTypeCommon packetType = event.getPacketType();
+        if (leavesConfig.isHardnessDisable())
+            return;
         if (packetType == PacketType.Play.Client.PLAYER_DIGGING) {
             this.handlePlayerDigging(event, player.getWorld().getUID());
         }

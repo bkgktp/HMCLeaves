@@ -55,6 +55,7 @@ public record AgeableData(
 
     @Override
     public WrappedBlockState getNewState(@Nullable Material worldMaterial) {
+
         final WrappedBlockState state;
         if (worldMaterial == this.defaultLowerMaterial && LeavesConfig.getDefaultAgeableStringId(this.realBlockType).equals(this.id)) {
             state = SpigotConversionUtil.fromBukkitBlockData(this.defaultLowerMaterial.createBlockData());

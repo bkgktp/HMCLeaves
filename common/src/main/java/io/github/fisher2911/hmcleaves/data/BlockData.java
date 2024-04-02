@@ -173,7 +173,8 @@ public interface BlockData {
             Axis axis,
             String modelPath,
             Set<BlockFace> supportableFaces,
-            BlockDataSound blockDataSound
+            BlockDataSound blockDataSound,
+            boolean logMechanic
     ) {
         return new LogData(
                 id,
@@ -186,7 +187,8 @@ public interface BlockData {
                 axis,
                 modelPath,
                 supportableFaces,
-                blockDataSound
+                blockDataSound,
+                logMechanic
         );
     }
 
@@ -263,6 +265,24 @@ public interface BlockData {
                 defaultLowerMaterial,
                 stackLimit,
                 breakReplacement,
+                supportableFaces,
+                blockDataSound
+        );
+    }
+
+    static NoteBlockData noteBlockData(
+            String id,
+            int sendBlockId,
+            Material realBlockType,
+            String modelPath,
+            Set<BlockFace> supportableFaces,
+            BlockDataSound blockDataSound
+    ) {
+        return new NoteBlockData(
+                id,
+                sendBlockId,
+                realBlockType,
+                modelPath,
                 supportableFaces,
                 blockDataSound
         );

@@ -26,12 +26,10 @@ import com.github.retrooper.packetevents.protocol.world.states.WrappedBlockState
 import com.github.retrooper.packetevents.protocol.world.states.enums.Instrument;
 import com.github.retrooper.packetevents.protocol.world.states.type.StateTypes;
 import io.github.fisher2911.hmcleaves.HMCLeaves;
-import io.github.fisher2911.hmcleaves.data.BlockData;
-import io.github.fisher2911.hmcleaves.data.BlockDataSound;
-import io.github.fisher2911.hmcleaves.data.CaveVineData;
-import io.github.fisher2911.hmcleaves.data.LimitedStacking;
-import io.github.fisher2911.hmcleaves.data.LogData;
-import io.github.fisher2911.hmcleaves.data.SoundData;
+import io.github.fisher2911.hmcleaves.data.*;
+import io.github.fisher2911.hmcleaves.database.DatabaseType;
+import io.github.fisher2911.hmcleaves.database.MongoDBDatabase;
+import io.github.fisher2911.hmcleaves.database.SQLiteDatabase;
 import io.github.fisher2911.hmcleaves.hook.Hooks;
 import io.github.fisher2911.hmcleaves.packet.BlockBreakModifier;
 import io.github.fisher2911.hmcleaves.util.ChainedBlockUtil;
@@ -50,6 +48,7 @@ import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.block.data.Orientable;
 import org.bukkit.block.data.type.CaveVinesPlant;
+import org.bukkit.block.data.type.NoteBlock;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -84,6 +83,8 @@ public class LeavesConfig {
     private static final String DEFAULT_SAPLING_ID = "default_sapling_id";
     private static final String DEFAULT_CAVE_VINES_ID = "default_cave_vines_id";
     private static final String DEFAULT_AGEABLE_ID = "default_ageable_id";
+
+    private static final String DEFAULT_NOTEBLOCK_ID = "default_noteblock_id";
 
     private static final int STATES_PER_LEAF = 7 * 2;
     private static final List<Material> LEAVES = new ArrayList<>();
@@ -235,7 +236,6 @@ public class LeavesConfig {
         } catch (IllegalArgumentException ignored) {
 
         }
-
     }
 
     public static int getDefaultLeafId(Material leafMaterial) {
@@ -286,6 +286,10 @@ public class LeavesConfig {
         return DEFAULT_AGEABLE_ID + "_" + material.name().toLowerCase();
     }
 
+    public static String getDefaultNoteBlockStringId(Material material) {
+        return DEFAULT_NOTEBLOCK_ID + "_" + material.name().toLowerCase();
+    }
+
     @Nullable
     public static String getDefaultBlockStringId(org.bukkit.block.data.BlockData blockData) {
         final Material material = blockData.getMaterial();
@@ -327,9 +331,14 @@ public class LeavesConfig {
     private Material defaultLogMaterial = Material.OAK_LOG;
     private Material defaultStrippedLogMaterial = Material.STRIPPED_OAK_LOG;
 
+    private final Material defaultNoteBlockMaterial = Material.STONE;
+
     private int chunkVersion;
     private boolean useWorldWhitelist;
     private Set<String> whitelistedWorlds;
+    private boolean useTextureHook;
+    private DatabaseType databaseType;
+    private String mongoDbUri;
 
     public LeavesConfig(
             HMCLeaves plugin,
@@ -418,6 +427,11 @@ public class LeavesConfig {
     @Nullable
     public BlockData getDefaultBlockData(org.bukkit.block.data.BlockData blockData) {
         final Material material = blockData.getMaterial();
+
+        if (material == Material.STONE) {
+            return this.getDefaultNoteBlockData(material);
+        }
+
         if (Tag.LEAVES.isTagged(material)) {
             return getDefaultLeafData(material);
         }
@@ -445,6 +459,12 @@ public class LeavesConfig {
             Material.TWISTING_VINES_PLANT, Material.TWISTING_VINES,
             Material.WEEPING_VINES_PLANT, Material.WEEPING_VINES
     );
+
+    @Nullable
+    public BlockData getDefaultNoteBlockData(Material material) {
+        //final Material actualMaterial = AGEABLE_MATERIAL_CONVERSION.getOrDefault(material, material);
+        return this.blockDataMap.get(getDefaultNoteBlockStringId(material));
+    }
 
     @Nullable
     public BlockData getDefaultAgeableData(Material material) {
@@ -498,7 +518,10 @@ public class LeavesConfig {
 
     private static final String LEAVES_PATH = "leaves";
     private static final String LOGS_PATH = "logs";
+
+    private static final String NOTEBLOCKS_PATH = "note-blocks";
     private static final String SAPLINGS_PATH = "saplings";
+
     private static final String CAVE_VINES_PATH = "cave-vines";
     private static final String SUGAR_CANE_PATH = "sugar-cane";
     private static final String KELP_PATH = "kelp";
@@ -507,7 +530,9 @@ public class LeavesConfig {
 
 
     private static final String LEAF_MATERIAL_PATH = "leaf-material";
+
     private static final String LOG_MATERIAL_PATH = "log-material";
+    private static final String SERVERSIDE_BLOCK_MATERIAL = "serverside-block-material";
     private static final String WORLD_PERSISTENCE_PATH = "world-persistence";
     private static final String STRIPPED_LOG_MATERIAL_PATH = "stripped-log-material";
     private static final String STATE_ID_PATH = "state-id";
@@ -526,8 +551,15 @@ public class LeavesConfig {
     private static final String ONLY_FOLLOW_WORLD_PERSISTENCE_IF_CONNECTED_TO_LOG_PATH = "only-follow-world-persistence-if-connected-to-log";
     private boolean onlyFollowWorldPersistenceIfConnectedToLog;
 
+    private boolean hardnessDisabled;
+
+    private static final String DISABLED_HARDNESS = "disable-hardness";
+
     private static final String CHUNK_VERSION_PATH = "chunk-version";
     private static final String USE_WORLD_WHITELIST_PATH = "use-world-whitelist";
+    private static final String USE_TEXTURE_HOOK_PATH = "use-texture-hook";
+    private static final String DATABASE_TYPE_PATH = "database-type";
+    private static final String MONGODB_URI_PATH = "mongodb-uri";
     private static final String WHITELISTED_WORLDS_PATH = "whitelisted-worlds";
 
     private static final Collection<String> DEFAULT_FILE_NAMES = List.of(
@@ -545,6 +577,7 @@ public class LeavesConfig {
     public void load() {
         this.plugin.saveDefaultConfig();
         final FileConfiguration config = this.plugin.getConfig();
+        this.hardnessDisabled = config.getBoolean(DISABLED_HARDNESS, false);
         this.onlyFollowWorldPersistenceIfConnectedToLog = config.getBoolean(ONLY_FOLLOW_WORLD_PERSISTENCE_IF_CONNECTED_TO_LOG_PATH, false);
         try {
             this.defaultLeafMaterial = Material.valueOf(config.getString(DEFAULT_LEAF_MATERIAL_PATH));
@@ -558,7 +591,11 @@ public class LeavesConfig {
             this.defaultStrippedLogMaterial = Material.valueOf(config.getString(DEFAULT_STRIPPED_LOG_MATERIAL_PATH));
         } catch (IllegalArgumentException ignored) {
         }
+
         this.useWorldWhitelist = config.getBoolean(USE_WORLD_WHITELIST_PATH, false);
+        this.useTextureHook = config.getBoolean(USE_TEXTURE_HOOK_PATH, true);
+        this.databaseType = DatabaseType.valueOf(config.getString(DATABASE_TYPE_PATH, "SQLITE").toUpperCase());
+        this.mongoDbUri = config.getString(MONGODB_URI_PATH);
         this.whitelistedWorlds = new HashSet<>(config.getStringList(WHITELISTED_WORLDS_PATH));
         if (!config.contains(CHUNK_VERSION_PATH)) {
             config.set(CHUNK_VERSION_PATH, 1);
@@ -576,7 +613,7 @@ public class LeavesConfig {
         }
         boolean createDefaults = true;
         for (final File file : files) {
-            if (!DEFAULT_FILE_NAMES.contains(file)) {
+            if (!DEFAULT_FILE_NAMES.contains(file.getName())) {
                 createDefaults = false;
                 break;
             }
@@ -591,6 +628,7 @@ public class LeavesConfig {
         }
         this.loadLeavesSection(config);
         this.loadLogsSection(config);
+        //this.loadNoteBlockSection(config);
         this.loadSaplingsSection(config);
         this.loadCaveVinesSection(config);
         this.loadAgeableSections(config);
@@ -598,11 +636,13 @@ public class LeavesConfig {
             final YamlConfiguration fileConfig = YamlConfiguration.loadConfiguration(file);
             this.loadLeavesSection(fileConfig);
             this.loadLogsSection(fileConfig);
+            //this.loadNoteBlockSection(config);
             this.loadSaplingsSection(fileConfig);
             this.loadCaveVinesSection(fileConfig);
             this.loadAgeableSections(fileConfig);
         }
         for (Material leaf : LEAVES) {
+            if (!this.useTextureHook) break;
             this.textureFileGenerator.generateFile(
                     leaf,
                     this.blockDataMap.values().stream()
@@ -612,6 +652,7 @@ public class LeavesConfig {
             );
         }
         for (Material sapling : SAPLINGS) {
+            if (!this.useTextureHook) break;
             this.textureFileGenerator.generateFile(
                     sapling,
                     this.blockDataMap.values().stream()
@@ -621,6 +662,7 @@ public class LeavesConfig {
             );
         }
         for (Material log : LOGS) {
+            if (!this.useTextureHook) break;
             this.textureFileGenerator.generateFile(
                     Material.NOTE_BLOCK,
                     this.blockDataMap.values().stream()
@@ -631,6 +673,7 @@ public class LeavesConfig {
             );
         }
         for (Material log : STRIPPED_LOGS) {
+            if (!this.useTextureHook) break;
             this.textureFileGenerator.generateFile(
                     Material.NOTE_BLOCK,
                     this.blockDataMap.values().stream()
@@ -649,6 +692,10 @@ public class LeavesConfig {
             final org.bukkit.block.data.BlockData bukkitBlockData = SpigotConversionUtil.toBukkitBlockData(state);
             this.blockDataMapByBukkitBlockDataString.put(bukkitBlockData.getAsString(), blockData);
         }
+    }
+
+    public boolean isHardnessDisable() {
+        return this.hardnessDisabled;
     }
 
     public int getChunkVersion() {
@@ -685,6 +732,18 @@ public class LeavesConfig {
 
     public boolean isUseWorldWhitelist() {
         return useWorldWhitelist;
+    }
+
+    public boolean isUseTextureHook() {
+        return this.useTextureHook;
+    }
+
+    public DatabaseType getDatabaseType() {
+        return databaseType;
+    }
+
+    public String getMongoDbUri() {
+        return mongoDbUri;
     }
 
     public boolean canPlaceBlockAgainst(BlockData blockData, Block block) {
@@ -761,7 +820,8 @@ public class LeavesConfig {
                         axis,
                         null,
                         DEFAULT_BLOCK_SUPPORTABLE_FACES,
-                        null
+                        null,
+                        false
                 );
                 this.blockDataMap.put(defaultLogStringId, blockData);
                 this.blockDataMap.put(defaultStrippedLogStringId, blockData.strip());
@@ -959,132 +1019,204 @@ public class LeavesConfig {
     private static final String INSTRUMENT_PATH = "instrument";
     private static final String STRIPPED_INSTRUMENT_PATH = "stripped-instrument";
     private static final String NOTE_PATH = "note";
+
+    private static final String POWERED_PATH = "powered";
     private static final String STRIPPED_NOTE_PATH = "stripped-note";
     private static final String STRIPPED_LOG_ID_PATH = "stripped-log-id";
     private static final String STRIPPED_LOG_ITEM_PATH = "stripped-log";
     private static final String GENERATE_AXES_PATH = "generate-axes";
+    private static final String ENABLE_LOG_MECHANIC_PATH = "log-mechanic";
+
 
     private void loadLogsSection(FileConfiguration config) {
         final ConfigurationSection logsSection = config.getConfigurationSection(LOGS_PATH);
-        if (logsSection == null) return;
+        if (logsSection == null)
+            return;
         for (final var itemId : logsSection.getKeys(false)) {
-            String strippedLogId = logsSection.getString(itemId + "." + STRIPPED_LOG_ID_PATH);
-            final boolean generateAxes = logsSection.getBoolean(itemId + "." + GENERATE_AXES_PATH, false);
-            if (strippedLogId == null) {
-                strippedLogId = itemId;
-            }
-            final WrappedBlockState state = WrappedBlockState.getDefaultState(StateTypes.NOTE_BLOCK);
-            final WrappedBlockState strippedLogState = WrappedBlockState.getDefaultState(StateTypes.NOTE_BLOCK);
-            final Material logMaterial = this.loadMaterial(logsSection, itemId + "." + LOG_MATERIAL_PATH, this.defaultLogMaterial);
-            final Material strippedLogMaterial = this.loadMaterial(logsSection, itemId + "." + STRIPPED_LOG_MATERIAL_PATH, this.defaultStrippedLogMaterial);
-            final String modelPath = logsSection.getString(itemId + "." + MODEL_PATH_PATH, null);
-            Instrument instrument = INSTRUMENTS.get(0);
-            int note = 0;
-            Instrument strippedInstrument = INSTRUMENTS.get(0);
-            int strippedNote = 3;
-            try {
-                instrument = Instrument.valueOf(logsSection.getString(itemId + "." + INSTRUMENT_PATH).toUpperCase());
-                note = logsSection.getInt(itemId + "." + NOTE_PATH);
-                strippedInstrument = Instrument.valueOf(logsSection.getString(itemId + "." + STRIPPED_INSTRUMENT_PATH).toUpperCase());
-                strippedNote = logsSection.getInt(itemId + "." + STRIPPED_NOTE_PATH);
-            } catch (IllegalArgumentException | NullPointerException e) {
-                this.plugin.getLogger().warning("Invalid instrument or note for log " + itemId + " in config.yml, " +
-                        "make sure you are using a hook if this is intentional");
-            }
-            state.setInstrument(instrument);
-            state.setNote(note);
-            strippedLogState.setInstrument(strippedInstrument);
-            strippedLogState.setNote(strippedNote);
-            final Supplier<ItemStack> itemStackSupplier = this.loadItemStack(
-                    logsSection.getConfigurationSection(itemId),
-                    itemId,
-                    itemId
+            boolean enableLogMechanic = logsSection.getBoolean(itemId + "." + ENABLE_LOG_MECHANIC_PATH, true);
+            if (enableLogMechanic) {
+                this.loadLog(itemId, logsSection);
+            } else this.loadNoteBlock(itemId, logsSection);
+        }
+    }
+
+    private void loadNoteBlock(String itemId, ConfigurationSection logsSection) {
+        final WrappedBlockState state = WrappedBlockState.getDefaultState(StateTypes.NOTE_BLOCK);
+        final Material logMaterial = this.loadMaterial(logsSection, itemId + "." + SERVERSIDE_BLOCK_MATERIAL, this.defaultLogMaterial);
+        final String modelPath = logsSection.getString(itemId + "." + MODEL_PATH_PATH, null);
+
+        Instrument instrument = INSTRUMENTS.get(0);
+        int note = 0;
+        boolean powered = false;
+        try {
+            instrument = Instrument.valueOf(logsSection.getString(itemId + "." + INSTRUMENT_PATH).toUpperCase());
+            note = logsSection.getInt(itemId + "." + NOTE_PATH);
+            powered = logsSection.getBoolean(itemId + "." + POWERED_PATH);
+        } catch (IllegalArgumentException | NullPointerException e) {
+            this.plugin.getLogger().warning("Invalid instrument or note for log " + itemId + " in config.yml, " +
+                    "make sure you are using a hook if this is intentional");
+        }
+        state.setInstrument(instrument);
+        state.setNote(note);
+        state.setPowered(powered);
+        final Supplier<ItemStack> itemStackSupplier = this.loadItemStack(
+                logsSection.getConfigurationSection(itemId),
+                itemId,
+                itemId
+        );
+
+        final Set<BlockFace> supportableFaces = this.loadSupportableFaces(logsSection.getConfigurationSection(itemId), DEFAULT_BLOCK_SUPPORTABLE_FACES);
+        this.itemSupplierMap.put(itemId, itemStackSupplier);
+        this.playerItemIds.add(itemId);
+        final ConfigurationSection predicateSection = logsSection.getConfigurationSection(itemId + "." + ALLOWED_SUPPORTABLE_BLOCKS);
+        if (predicateSection != null) {
+            final Predicate<Block> predicate = this.loadSupportableBlockPredicate(predicateSection);
+            this.blockSupportPredicateMap.put(itemId, predicate);
+        }
+        final BlockDataSound sound = this.loadBlockDataSound(logsSection.getConfigurationSection(itemId));
+        final LogData blockData = BlockData.logData(
+                itemId,
+                null,
+                state.getGlobalId(),
+                logMaterial,
+                null,
+                false,
+                0,
+                Axis.Y,
+                modelPath,
+                supportableFaces,
+                sound,
+                false
+        );
+        if (predicateSection != null) {
+            final Predicate<Block> predicate = this.loadSupportableBlockPredicate(predicateSection);
+            this.blockSupportPredicateMap.put(itemId, predicate);
+        }
+        this.blockDataMap.put(itemId, blockData);
+        this.itemSupplierMap.put(itemId, itemStackSupplier);
+
+    }
+
+    private void loadLog(String itemId, ConfigurationSection logsSection) {
+        String strippedLogId = logsSection.getString(itemId + "." + STRIPPED_LOG_ID_PATH);
+        final boolean generateAxes = logsSection.getBoolean(itemId + "." + GENERATE_AXES_PATH, false);
+        if (strippedLogId == null) {
+            strippedLogId = itemId;
+        }
+
+        final WrappedBlockState state = WrappedBlockState.getDefaultState(StateTypes.NOTE_BLOCK);
+        final WrappedBlockState strippedLogState = WrappedBlockState.getDefaultState(StateTypes.NOTE_BLOCK);
+        final Material logMaterial = this.loadMaterial(logsSection, itemId + "." + LOG_MATERIAL_PATH, this.defaultLogMaterial);
+        final Material strippedLogMaterial = this.loadMaterial(logsSection, itemId + "." + STRIPPED_LOG_MATERIAL_PATH, this.defaultStrippedLogMaterial);
+        final String modelPath = logsSection.getString(itemId + "." + MODEL_PATH_PATH, null);
+
+        Instrument instrument = INSTRUMENTS.get(0);
+        int note = 0;
+        Instrument strippedInstrument = INSTRUMENTS.get(0);
+        int strippedNote = 3;
+        try {
+            instrument = Instrument.valueOf(logsSection.getString(itemId + "." + INSTRUMENT_PATH).toUpperCase());
+            note = logsSection.getInt(itemId + "." + NOTE_PATH);
+            strippedInstrument = Instrument.valueOf(logsSection.getString(itemId + "." + STRIPPED_INSTRUMENT_PATH).toUpperCase());
+            strippedNote = logsSection.getInt(itemId + "." + STRIPPED_NOTE_PATH);
+        } catch (IllegalArgumentException | NullPointerException e) {
+            this.plugin.getLogger().warning("Invalid instrument or note for log " + itemId + " in config.yml, " +
+                    "make sure you are using a hook if this is intentional");
+        }
+        state.setInstrument(instrument);
+        state.setNote(note);
+        strippedLogState.setInstrument(strippedInstrument);
+        strippedLogState.setNote(strippedNote);
+        final Supplier<ItemStack> itemStackSupplier = this.loadItemStack(
+                logsSection.getConfigurationSection(itemId),
+                itemId,
+                itemId
+        );
+        final Supplier<ItemStack> strippedItemStackSupplier;
+        if (logsSection.getConfigurationSection(itemId).getConfigurationSection(STRIPPED_LOG_ITEM_PATH) != null) {
+            strippedItemStackSupplier = this.loadItemStack(
+                    logsSection.getConfigurationSection(itemId).getConfigurationSection(STRIPPED_LOG_ITEM_PATH),
+                    strippedLogId,
+                    strippedLogId
             );
-            final Supplier<ItemStack> strippedItemStackSupplier;
-            if (logsSection.getConfigurationSection(itemId).getConfigurationSection(STRIPPED_LOG_ITEM_PATH) != null) {
-                strippedItemStackSupplier = this.loadItemStack(
-                        logsSection.getConfigurationSection(itemId).getConfigurationSection(STRIPPED_LOG_ITEM_PATH),
-                        strippedLogId,
-                        strippedLogId
-                );
-            } else {
-                strippedItemStackSupplier = this.loadItemStack(
-                        logsSection.getConfigurationSection(itemId),
-                        strippedLogId,
-                        strippedLogId
-                );
+        } else {
+            strippedItemStackSupplier = this.loadItemStack(
+                    logsSection.getConfigurationSection(itemId),
+                    strippedLogId,
+                    strippedLogId
+            );
+        }
+        final Set<BlockFace> supportableFaces = this.loadSupportableFaces(logsSection.getConfigurationSection(itemId), DEFAULT_BLOCK_SUPPORTABLE_FACES);
+        this.itemSupplierMap.put(itemId, itemStackSupplier);
+        this.itemSupplierMap.put(strippedLogId, strippedItemStackSupplier);
+        this.playerItemIds.add(itemId);
+        this.playerItemIds.add(strippedLogId);
+        final ConfigurationSection predicateSection = logsSection.getConfigurationSection(itemId + "." + ALLOWED_SUPPORTABLE_BLOCKS);
+        if (predicateSection != null) {
+            final Predicate<Block> predicate = this.loadSupportableBlockPredicate(predicateSection);
+            this.blockSupportPredicateMap.put(itemId, predicate);
+        }
+        final BlockDataSound sound = this.loadBlockDataSound(logsSection.getConfigurationSection(itemId));
+        Integer nextNote = null;
+        Instrument nextInstrument = null;
+        Integer nextStrippedNote = null;
+        Instrument nextStrippedInstrument = null;
+        for (Axis axis : Axis.values()) {
+            final String directionalId = itemId + "_" + axis.name().toLowerCase();
+            final String strippedDirectionalId = strippedLogId + "_" + axis.name().toLowerCase();
+            if (generateAxes) {
+                if (nextNote != null) {
+                    nextNote = getNextNote(nextNote);
+                } else {
+                    nextNote = note;
+                }
+                state.setNote(nextNote);
+                if (nextNote == 0) {
+                    if (nextInstrument != null) {
+                        nextInstrument = getNextInstrument(nextInstrument);
+                    } else {
+                        nextInstrument = instrument;
+                    }
+                    state.setInstrument(nextInstrument);
+                }
+                if (nextStrippedNote != null) {
+                    nextStrippedNote = getNextNote(nextStrippedNote);
+                } else {
+                    nextStrippedNote = strippedNote;
+                }
+                strippedLogState.setNote(nextStrippedNote);
+                if (nextStrippedNote == 0) {
+                    if (nextStrippedInstrument != null) {
+                        nextStrippedInstrument = getNextInstrument(nextStrippedInstrument);
+                    } else {
+                        nextStrippedInstrument = strippedInstrument;
+                    }
+                    strippedLogState.setInstrument(nextStrippedInstrument);
+                }
             }
-            final Set<BlockFace> supportableFaces = this.loadSupportableFaces(logsSection.getConfigurationSection(itemId), DEFAULT_BLOCK_SUPPORTABLE_FACES);
-            this.itemSupplierMap.put(itemId, itemStackSupplier);
-            this.itemSupplierMap.put(strippedLogId, strippedItemStackSupplier);
-            this.playerItemIds.add(itemId);
-            this.playerItemIds.add(strippedLogId);
-            final ConfigurationSection predicateSection = logsSection.getConfigurationSection(itemId + "." + ALLOWED_SUPPORTABLE_BLOCKS);
+            final LogData blockData = BlockData.logData(
+                    directionalId,
+                    strippedDirectionalId,
+                    state.getGlobalId(),
+                    logMaterial,
+                    strippedLogMaterial,
+                    false,
+                    strippedLogState.getGlobalId(),
+                    axis,
+                    modelPath,
+                    supportableFaces,
+                    sound,
+                    true
+            );
             if (predicateSection != null) {
                 final Predicate<Block> predicate = this.loadSupportableBlockPredicate(predicateSection);
-                this.blockSupportPredicateMap.put(itemId, predicate);
+                this.blockSupportPredicateMap.put(directionalId, predicate);
+                this.blockSupportPredicateMap.put(strippedDirectionalId, predicate);
             }
-            final BlockDataSound sound = this.loadBlockDataSound(logsSection.getConfigurationSection(itemId));
-            Integer nextNote = null;
-            Instrument nextInstrument = null;
-            Integer nextStrippedNote = null;
-            Instrument nextStrippedInstrument = null;
-            for (Axis axis : Axis.values()) {
-                final String directionalId = itemId + "_" + axis.name().toLowerCase();
-                final String strippedDirectionalId = strippedLogId + "_" + axis.name().toLowerCase();
-                if (generateAxes) {
-                    if (nextNote != null) {
-                        nextNote = getNextNote(nextNote);
-                    } else {
-                        nextNote = note;
-                    }
-                    state.setNote(nextNote);
-                    if (nextNote == 0) {
-                        if (nextInstrument != null) {
-                            nextInstrument = getNextInstrument(nextInstrument);
-                        } else {
-                            nextInstrument = instrument;
-                        }
-                        state.setInstrument(nextInstrument);
-                    }
-                    if (nextStrippedNote != null) {
-                        nextStrippedNote = getNextNote(nextStrippedNote);
-                    } else {
-                        nextStrippedNote = strippedNote;
-                    }
-                    strippedLogState.setNote(nextStrippedNote);
-                    if (nextStrippedNote == 0) {
-                        if (nextStrippedInstrument != null) {
-                            nextStrippedInstrument = getNextInstrument(nextStrippedInstrument);
-                        } else {
-                            nextStrippedInstrument = strippedInstrument;
-                        }
-                        strippedLogState.setInstrument(nextStrippedInstrument);
-                    }
-                }
-                final LogData blockData = BlockData.logData(
-                        directionalId,
-                        strippedDirectionalId,
-                        state.getGlobalId(),
-                        logMaterial,
-                        strippedLogMaterial,
-                        false,
-                        strippedLogState.getGlobalId(),
-                        axis,
-                        modelPath,
-                        supportableFaces,
-                        sound
-                );
-                if (predicateSection != null) {
-                    final Predicate<Block> predicate = this.loadSupportableBlockPredicate(predicateSection);
-                    this.blockSupportPredicateMap.put(directionalId, predicate);
-                    this.blockSupportPredicateMap.put(strippedDirectionalId, predicate);
-                }
-                this.blockDataMap.put(directionalId, blockData);
-                this.blockDataMap.put(strippedDirectionalId, blockData.strip());
-                this.itemSupplierMap.put(directionalId, itemStackSupplier);
-                this.itemSupplierMap.put(strippedDirectionalId, strippedItemStackSupplier);
-            }
+            this.blockDataMap.put(directionalId, blockData);
+            this.blockDataMap.put(strippedDirectionalId, blockData.strip());
+            this.itemSupplierMap.put(directionalId, itemStackSupplier);
+            this.itemSupplierMap.put(strippedDirectionalId, strippedItemStackSupplier);
         }
     }
 
@@ -1591,4 +1723,7 @@ public class LeavesConfig {
         return new SoundData(name, category, volume, pitch);
     }
 
+    public Material getDefaultNoteBlockMaterial() {
+        return defaultNoteBlockMaterial;
+    }
 }
